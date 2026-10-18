@@ -28,7 +28,7 @@ def root():
         img.save(out, "GIF")
         c = "data:image/gif;base64," + base64.b64encode(out.getvalue()).decode("ascii")
     return {
-        "t": info.get("title"),
-        "a": info.get("artist"),
+        "t": info.get("title", "").replace("🄴", "").replace("🄲", "").strip(),
+        "a": info.get("artist", ""),
         "c": c,
     }
