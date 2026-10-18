@@ -1,0 +1,12 @@
+[project]
+name = "sonos-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.143.3",
+    "httpx2>=2.13.1",
+    "pillow>=13.0.0",
+    "soco>=0.32.0",
+]
