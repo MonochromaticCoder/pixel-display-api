@@ -32,3 +32,39 @@ def root():
         "a": info.get("artist", ""),
         "c": c,
     }
+
+
+@app.post("/playpause")
+def playpause():
+    if zone.get_current_transport_info()["current_transport_state"] in {
+        "PLAYING",
+        "TRANSITIONING",
+    }:
+        zone.pause()
+    else:
+        zone.play()
+    return {}
+
+
+@app.post("/vol_up")
+def vol_up():
+    zone.volume += 5
+    return {}
+
+
+@app.post("/vol_down")
+def vol_down():
+    zone.volume -= 5
+    return {}
+
+
+@app.post("/next")
+def next():
+    zone.next()
+    return {}
+
+
+@app.post("/prev")
+def prev():
+    zone.previous()
+    return {}
