@@ -54,6 +54,7 @@ def sonos_to_mqtt():
             continue
         track: DidlMusicTrack = ev.variables.get("current_track_meta_data")
         if track:
+            publish("c885410ecd3c/cmd/apps/switch", "Sonos")
             track_dict = track.to_dict()
             cur_track = (
                 track_dict.get("title", ""),
@@ -82,6 +83,7 @@ def sonos_to_mqtt():
                     {"t": t.replace("🄴", "").replace("🄲", "").strip(), "a": a, "c": c},
                 )
         else:
+            publish("c885410ecd3c/cmd/apps/next", {})
             publish(
                 "sonos/now",
                 {"t": None, "a": None, "c": None},
