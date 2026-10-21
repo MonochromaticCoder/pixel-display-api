@@ -1,37 +1,97 @@
 import base64
+import json
 
 from soco import SoCo, discover
+from soco.data_structures import DidlMusicTrack
 from time import sleep
 from fastapi import FastAPI
 import httpx2
 from io import BytesIO
 from PIL import Image
+from time import sleep
+import threading
+from queue import Empty
+from soco.events import Subscription, Event
+from paho.mqtt import client as mqtt
+
+mqtt_client = mqtt.Client(client_id="pixel-display-api")
+mqtt_client.connect_async("192.168.48.100", 1883, keepalive=60)
+mqtt_client.loop_start()
+
+
+def publish(topic: str, payload, retain: bool = True):
+    if not isinstance(payload, str):
+        payload = json.dumps(payload)
+    mqtt_client.publish(topic, payload, retain=retain, qos=0)
+
 
 client = httpx2.Client()
 
 zone: SoCo = [x for x in (discover() or []) if x.player_name == "Living Room"][0]
 
+sub: Subscription = zone.avTransport.subscribe()
+stop = threading.Event()
+
+
+# Sonos drops subscribers that stay quiet: renew in the background
+def renew():
+    while not stop.wait(240):
+        try:
+            sub.renew()
+        except Exception as e:
+            print("renew failed:", e)
+
+
+threading.Thread(target=renew, daemon=True).start()
+
+
+def sonos_to_mqtt():
+    last_track: tuple[str, str, str] | None = None
+    while True:
+        try:
+            ev: Event = sub.events.get(timeout=0.5)
+        except Empty:
+            continue
+        track: DidlMusicTrack = ev.variables.get("current_track_meta_data")
+        if track:
+            track_dict = track.to_dict()
+            cur_track = (
+                track_dict.get("title", ""),
+                track_dict.get("creator", ""),
+                track_dict.get("album_art_uri", ""),
+            )
+            if cur_track != last_track and not (
+                last_track and last_track[2] and not cur_track[2]
+            ):
+                last_track = cur_track
+                t, a, c = last_track
+                if c:
+                    try:
+                        album_art_bytes = client.get(c).raise_for_status().content
+                        img = Image.open(BytesIO(album_art_bytes)).convert("RGB")
+                        img = img.resize((8, 8), Image.Resampling.BOX)
+                        out = BytesIO()
+                        img.save(out, "GIF")
+                        c = "data:image/gif;base64," + base64.b64encode(
+                            out.getvalue()
+                        ).decode("ascii")
+                    except:
+                        pass
+                publish(
+                    "sonos/now",
+                    {"t": t.replace("🄴", "").replace("🄲", "").strip(), "a": a, "c": c},
+                )
+        else:
+            publish(
+                "sonos/now",
+                {"t": None, "a": None, "c": None},
+            )
+
+
+threading.Thread(target=sonos_to_mqtt, daemon=True).start()
+
+
 app = FastAPI()
-
-
-@app.get("/")
-def root():
-    info = zone.get_current_track_info()
-    album_art_url = info.get("album_art")
-    c = None
-    if album_art_url:
-        print(album_art_url)
-        album_art_bytes = client.get(album_art_url).raise_for_status().content
-        img = Image.open(BytesIO(album_art_bytes)).convert("RGB")
-        img = img.resize((8, 8), Image.Resampling.BOX)
-        out = BytesIO()
-        img.save(out, "GIF")
-        c = "data:image/gif;base64," + base64.b64encode(out.getvalue()).decode("ascii")
-    return {
-        "t": info.get("title", "").replace("🄴", "").replace("🄲", "").strip(),
-        "a": info.get("artist", ""),
-        "c": c,
-    }
 
 
 @app.post("/playpause")
@@ -61,10 +121,12 @@ def vol_down():
 @app.post("/next")
 def next():
     zone.next()
+    zone.play()
     return {}
 
 
 @app.post("/prev")
 def prev():
     zone.previous()
+    zone.play()
     return {}
