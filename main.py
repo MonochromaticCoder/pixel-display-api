@@ -56,34 +56,39 @@ def sonos_to_mqtt():
         if track:
             track_dict = track.to_dict()
             cur_track = (
-                track_dict.get("title", ""),
-                track_dict.get("creator", ""),
-                track_dict.get("album_art_uri", ""),
+                track_dict.get("title", "").strip(),
+                track_dict.get("creator", "").strip(),
+                track_dict.get("album_art_uri", "").strip(),
             )
-            if cur_track != last_track and not (
-                last_track and last_track[2] and not cur_track[2]
-            ):
+            if cur_track != last_track:
                 last_track = cur_track
-                t, a, c = last_track
-                if c:
-                    try:
-                        album_art_bytes = client.get(c).raise_for_status().content
-                        img = Image.open(BytesIO(album_art_bytes)).convert("RGB")
-                        img = img.resize((8, 8), Image.Resampling.BOX)
-                        out = BytesIO()
-                        img.save(out, "GIF")
-                        c = "data:image/gif;base64," + base64.b64encode(
-                            out.getvalue()
-                        ).decode("ascii")
-                    except:
-                        pass
-                publish(
-                    "sonos/now",
-                    {"t": t.replace("🄴", "").replace("🄲", "").strip(), "a": a, "c": c},
-                )
-                publish("c885410ecd3c/cmd/apps/switch", "Sonos")
+                if cur_track[0]:
+                    t, a, c = cur_track
+                    if c:
+                        try:
+                            album_art_bytes = client.get(c).raise_for_status().content
+                            img = Image.open(BytesIO(album_art_bytes)).convert("RGB")
+                            img = img.resize((8, 8), Image.Resampling.BOX)
+                            out = BytesIO()
+                            img.save(out, "GIF")
+                            c = "data:image/gif;base64," + base64.b64encode(
+                                out.getvalue()
+                            ).decode("ascii")
+                        except:
+                            pass
+                    publish(
+                        "sonos/now",
+                        {
+                            "t": t.replace("🄴", "").replace("🄲", "").strip(),
+                            "a": a,
+                            "c": c,
+                        },
+                    )
+                    publish("c885410ecd3c/cmd/apps/switch", "Sonos")
+                else:
+                    publish("c885410ecd3c/cmd/apps/switch", "Weather")
         else:
-            publish("c885410ecd3c/cmd/apps/next", {})
+            publish("c885410ecd3c/cmd/apps/switch", "Weather")
 
 
 threading.Thread(target=sonos_to_mqtt, daemon=True).start()
