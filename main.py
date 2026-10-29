@@ -4,7 +4,7 @@ import json
 from soco import SoCo, discover
 from soco.data_structures import DidlMusicTrack
 from time import sleep
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 import httpx2
 from io import BytesIO
 from PIL import Image
@@ -13,9 +13,28 @@ import threading
 from queue import Empty
 from soco.events import Subscription, Event
 from paho.mqtt import client as mqtt
+import asyncio
+from sonos_websocket.websocket import SonosWebsocket
+import os
+from openai import OpenAI
+import uuid
+
+inference = OpenAI(
+    base_url=os.getenv("INFERENCE_BASE_URL"),
+    api_key=os.getenv("INFERENCE_API_KEY"),
+    timeout=None,
+)
+
+
+async def notify(ip: str, clip_uri: str):
+    ws = SonosWebsocket(ip)
+    await ws.connect()
+    await ws.play_clip(uri=clip_uri, volume=70)
+    await ws.close()
+
 
 mqtt_client = mqtt.Client(client_id="pixel-display-api")
-mqtt_client.connect_async("192.168.48.100", 1883, keepalive=60)
+mqtt_client.connect("192.168.48.200", 1883, keepalive=60)
 mqtt_client.loop_start()
 
 
@@ -25,12 +44,37 @@ def publish(topic: str, payload, retain: bool = True):
     mqtt_client.publish(topic, payload, retain=retain, qos=0)
 
 
+def on_message(client, userdata, msg):
+    try:
+        message: dict = json.loads(msg.payload.decode())
+        sound_id = str(uuid.uuid4())
+        res = inference.audio.speech.create(
+            model="breeze-tts-2",
+            voice=message["voice"],
+            input=message["content"],
+        )
+        sounds[sound_id] = res.content
+        asyncio.run(
+            notify(
+                zone.ip_address,
+                f"{os.getenv('SELF_URL')}/notification_sound/{sound_id}",
+            )
+        )
+    except:
+        pass
+
+
+mqtt_client.subscribe("sonos/speak")
+mqtt_client.on_message = on_message
+
+
 client = httpx2.Client()
 
 zone: SoCo = [x for x in (discover() or []) if x.player_name == "Living Room"][0]
 
 sub: Subscription = zone.avTransport.subscribe()
 stop = threading.Event()
+sounds: dict[str, bytes] = {}
 
 
 # Sonos drops subscribers that stay quiet: renew in the background
@@ -133,3 +177,8 @@ def prev():
     zone.previous()
     zone.play()
     return {}
+
+
+@app.get("/notification_sound/{sound_id}")
+def notification_sound(sound_id: str):
+    return Response(content=sounds.pop(sound_id), media_type="audio/wav")
